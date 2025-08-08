@@ -6,14 +6,14 @@ def kpi_row(df):
         vals = [0,0,0,0,0]
     else:
         vals = [
-            df.loc[0, "TOTAL_DEPOSITS"] or 0,
-            df.loc[0, "TOTAL_WITHDRAWALS"] or 0,
-            df.loc[0, "TOTAL_VOLUME"] or 0,
-            df.loc[0, "TOTAL_PROFIT"] or 0,
+            df.loc[0, "NUM_TRADES"] or 0,
+            df.loc[0, "NUM_TRADERS"] or 0,
+            df.loc[0, "SITE_PROFITS"] or 0,
+            df.loc[0, "SITE_VOLUME"] or 0,
             (df.loc[0, "MARGIN"] or 0) * 100
         ]
-    col1.metric("Total Deposits", f"${vals[0]:,.2f}")
-    col2.metric("Total Withdrawals", f"${vals[1]:,.2f}")
-    col3.metric("Trading Volume", f"${vals[2]:,.2f}")
-    col4.metric("Total Profit", f"${vals[3]:,.2f}")
+    col1.metric("Total Trades", f"${vals[0]:,.0f}")
+    col2.metric("Total Traders", f"${vals[1]:,.0f}")
+    col3.metric("Total Profit", f"${vals[3]:,.0f}")
+    col4.metric("Trading Volume", f"${vals[2]:,.0f}")
     col5.metric("Margin", f"{vals[4]:.2f}%")

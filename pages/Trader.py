@@ -1,17 +1,17 @@
 import streamlit as st
 from pathlib import Path
-from lib.db import read_sql
-from lib.formats import daterange_to_utc
 
-def render():
+
+from lib.db import read_sql
+
+
+def render(start_dt_utc, end_dt_utc):
     st.title("Trader Detail Overview")
 
     trader_id = st.text_input("Enter Trader ID, Email, or Username")
     if not trader_id:
         st.info("Please enter a trader to view details.")
         return
-
-    start_dt_utc, end_dt_utc, *_ = daterange_to_utc()
 
     sql_profile = Path("queries/trader_profile.sql").read_text()
     sql_profile = sql_profile.format(

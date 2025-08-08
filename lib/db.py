@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from datetime import date, time, datetime, timedelta
 from pathlib import Path
 from typing import Optional, Dict, Any
 
@@ -200,11 +201,22 @@ def get_session(profile: Optional[str] = None) -> Session:
 # -------------------------------
 
 @st.cache_data(ttl=60, show_spinner=False)
-def read_sql(sql: str, *, profile: Optional[str] = None):
+def read_sql(sql: str, params: dict | None = None, profile: Optional[str] = None):
     """
-    Cached SELECT helper. Works in SiS & local.
+    Run a Snowflake (Snowpark) SQL and return a pandas DataFrame.
+    Use Python .format() style with named params, e.g. {start} {end} {trader_id}.
+    Dates/timestamps/strings are auto-quoted here; numbers pass as-is.
+    Works in SiS and local Streamlit
     """
     session = get_session(profile)
+    if params:
+        safe_params = {}
+        for k, v in params.items():
+            if isinstance(v, (datetime, date, time, str)):
+                safe_params[k] = f"'{v}'"
+            else:
+                safe_params[k] = v
+        sql = sql.format(**safe_params)
     return session.sql(sql).to_pandas()
 
 
