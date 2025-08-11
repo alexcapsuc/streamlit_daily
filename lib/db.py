@@ -212,11 +212,15 @@ def read_sql(sql: str, params: dict | None = None, profile: Optional[str] = None
     if params:
         safe_params = {}
         for k, v in params.items():
-            if isinstance(v, (datetime, date, time, str)):
+            if v is None:
+                safe_params[k] = None
+            elif isinstance(v, (datetime, date, time, str)):
                 safe_params[k] = f"'{v}'"
             else:
                 safe_params[k] = v
         sql = sql.format(**safe_params)
+        with st.expander('query:'):
+            st.write(sql)
     return session.sql(sql).to_pandas()
 
 

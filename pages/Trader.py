@@ -5,10 +5,13 @@ from pathlib import Path
 from lib.db import read_sql
 
 
-def render(start_dt_utc, end_dt_utc):
+def render(start_dt_utc, end_dt_utc, selected_trader):
     st.title("Trader Detail Overview")
 
-    trader_id = st.text_input("Enter Trader ID, Email, or Username")
+    trader_id = st.text_input(
+        "Enter Trader ID, Email, or Username",
+        value=selected_trader
+    )
     if not trader_id:
         st.info("Please enter a trader to view details.")
         return

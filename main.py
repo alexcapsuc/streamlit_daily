@@ -3,50 +3,73 @@ from datetime import datetime, timedelta, date, time
 
 
 from pages import Overview, Trader
-from lib import formats
+from lib import formats, multiselect
 from lib import db
-from queries import filter_lists
+from queries.filter_lists import assets_list, durations_list
 
 
 st.set_page_config(page_title="Trading Platform Dashboard", layout="wide")
 
-page = st.sidebar.radio("Section", ["Overview", "Trader"], index=0)
 
-df_assets = db.read_sql(filter_lists.assets_list)
+# Helper: navigate to Trader page with a trader id
+def go_to_page(page: str, trader_id: str | int):
+    st.query_params.update(page=page, trader_id=str(trader_id))
+    st.rerun()
+    
+# Read current URL params
+qp = st.query_params
+default_page = qp.get("page", "Overview")
+default_trader = qp.get("trader_id", "44554")
+
+# Get values for filters
+df_assets = db.read_sql(assets_list)
 assets = (
     dict(zip(df_assets["ASSET_ID"], df_assets["ASSET_NAME"]))
-    if not df_assets.empty else {}
+    if not df_assets.empty else formats.assets
 )
 asset_id_options = list(assets.keys())
 
-df_durations = db.read_sql(filter_lists.durations_list)
+df_durations = db.read_sql(durations_list)
 durations = df_durations["DURATION"].tolist() if not df_durations.empty else formats.durations
 
-start_date, end_date = formats.today, formats.today 
-
+# # Read values saved to Session State
+# start_date, end_date = st.session_state.get(
+#     "selected_date_range", 
+#     (formats.today, formats.today)
+# )
+# sel_durations = st.session_state.get("durations__ms", durations)
+# sel_asset_ids = st.session_state.get("assets__ms", asset_id_options)
 
 # ===============================
 # SIDEBAR NAVIGATION
 # ===============================
 st.sidebar.subheader("Section")
+
 # Looks like button pills, but acts like a radio
 page = st.sidebar.segmented_control(
     "Section", 
     options=formats.sections, 
-    default=formats.default_section
+    default=default_page
 )
+if page != default_page:
+    go_to_page(page, default_trader)
 
 st.sidebar.subheader("Filters")
 
 # Quick date-range dropdown
-selected_range = st.sidebar.selectbox(
+st.session_state.selected_range = st.sidebar.selectbox(
     "Quick Date Range",
     options=list(formats.date_ranges.keys()),
+    key="date__dropdown",
     index=0  # default to the first one, e.g., "Today"
 )
 
 # Set start_date and end_date based on the selected range
-start_date, end_date = formats.date_ranges[selected_range]
+start_date, end_date = formats.date_ranges[st.session_state.selected_range]
+
+st.sidebar.write(start_date, end_date, 
+                 st.session_state.selected_range,
+                 st.session_state['date__dropdown'])
 
 # Date range picker
 picked_date = st.sidebar.date_input(
@@ -57,21 +80,28 @@ picked_date = st.sidebar.date_input(
 )
 if isinstance(picked_date, tuple) and len(picked_date) == 2:
     start_date, end_date = picked_date
+    
+st.session_state["selected_date_range"] = start_date, end_date
 
 start_dt = datetime.combine(start_date, time.min) - timedelta(hours=2)
 end_dt = datetime.combine(end_date, time.max) - timedelta(hours=2)
 
 # Game type selector = duration + asset (independent multiselects)
-sel_durations = st.sidebar.multiselect("Durations", durations, default=durations[:3])
-sel_asset_ids = st.sidebar.multiselect(
-    "Assets",
+sel_durations, all_durations = multiselect.multi_with_all(
+    label="Durations", 
+    options=durations,
+    key="durations"
+)
+sel_asset_ids, all_assets = multiselect.multi_with_all(
+    label="Assets",
     options=asset_id_options, 
-    default=asset_id_options[:5],
-    format_func=lambda _id: assets.get(_id, str(_id))  # display names
+    format_func=lambda _id: assets.get(_id, str(_id)),  # display names
+    key="assets"
 )
 
 # Derived combined labels (if you want to display/use later)
-selected_game_type_labels = [f"{d} {assets[a]}" for d in sel_durations for a in sel_asset_ids]
+selected_game_type_labels = [f"{d} {assets[a]}" for d in sel_durations 
+                             for a in sel_asset_ids]
 
 st.sidebar.write(selected_game_type_labels)
 
@@ -83,6 +113,14 @@ if st.sidebar.button("Refresh Data"):
 
     
 if page == "Overview":
-    Overview.render(start_dt, end_dt, sel_asset_ids, sel_durations)
+    Overview.render(
+        start_dt, end_dt, 
+        all_assets, all_durations, sel_asset_ids, sel_durations
+    )
 elif page == "Trader":
-    Trader.render(start_dt, end_dt)
+    Trader.render(
+        start_dt, end_dt, 
+        default_trader
+    )
+
+st.write(st.session_state)

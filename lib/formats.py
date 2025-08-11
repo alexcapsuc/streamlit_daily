@@ -4,6 +4,8 @@ from datetime import datetime, time, timedelta
 
 today = (datetime.today() + timedelta(hours=2)).date()
 
+ALL = "__ALL__"
+
 sections = ["Overview", "Trader"]
 default_section = sections[0]
 
