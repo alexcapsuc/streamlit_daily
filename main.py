@@ -2,7 +2,7 @@ import streamlit as st
 from datetime import datetime, timedelta, date, time
 
 
-from pages import Overview, Trader
+from manual_pages import Overview, Trader
 from lib import formats, multiselect
 from lib import db
 from queries.filter_lists import assets_list, durations_list
@@ -11,15 +11,20 @@ from queries.filter_lists import assets_list, durations_list
 st.set_page_config(page_title="Trading Platform Dashboard", layout="wide")
 
 
-# Helper: navigate to Trader page with a trader id
-def go_to_page(page: str, trader_id: str | int):
-    st.query_params.update(page=page, trader_id=str(trader_id))
-    st.rerun()
-    
+# Keep query params in sync (no st.rerun here)
+def sync_url_param():
+    if st.session_state.page is None:
+        st.session_state.page = "Overview"
+    if st.session_state.page != qp.get("page", "Overview"):
+        # if st.session_state.page == 'Overview' and qp.get("page") == "Trader":
+        st.write(f"Updating URL param from {qp.get('page')} to {st.session_state.page}")
+        st.query_params.update(page=st.session_state.page, trader_id=url_requested_trader)
+
+
 # Read current URL params
 qp = st.query_params
-default_page = qp.get("page", "Overview")
-default_trader = qp.get("trader_id", "44554")
+url_requested_trader = qp.get("trader_id", "44554")
+url_requested_page = qp.get("page", "Overview")
 
 # Get values for filters
 df_assets = db.read_sql(assets_list)
@@ -32,14 +37,6 @@ asset_id_options = list(assets.keys())
 df_durations = db.read_sql(durations_list)
 durations = df_durations["DURATION"].tolist() if not df_durations.empty else formats.durations
 
-# # Read values saved to Session State
-# start_date, end_date = st.session_state.get(
-#     "selected_date_range", 
-#     (formats.today, formats.today)
-# )
-# sel_durations = st.session_state.get("durations__ms", durations)
-# sel_asset_ids = st.session_state.get("assets__ms", asset_id_options)
-
 # ===============================
 # SIDEBAR NAVIGATION
 # ===============================
@@ -49,39 +46,34 @@ st.sidebar.subheader("Section")
 page = st.sidebar.segmented_control(
     "Section", 
     options=formats.sections, 
-    default=default_page
+    default=url_requested_page,
+    key="page",
+    on_change=sync_url_param
 )
-if page != default_page:
-    go_to_page(page, default_trader)
 
 st.sidebar.subheader("Filters")
 
 # Quick date-range dropdown
-st.session_state.selected_range = st.sidebar.selectbox(
+st.sidebar.selectbox(
     "Quick Date Range",
     options=list(formats.date_ranges.keys()),
-    key="date__dropdown",
-    index=0  # default to the first one, e.g., "Today"
+    key="selected_range",
+    # index=0  # default to the first one, e.g., "Today"
 )
 
 # Set start_date and end_date based on the selected range
 start_date, end_date = formats.date_ranges[st.session_state.selected_range]
-
-st.sidebar.write(start_date, end_date, 
-                 st.session_state.selected_range,
-                 st.session_state['date__dropdown'])
 
 # Date range picker
 picked_date = st.sidebar.date_input(
     "Manual Date Range",
     value=(start_date, end_date),
     min_value=date(2013, 1, 1),
-    max_value=date(2030, 12, 31)
+    max_value=date(2030, 12, 31),
+    key="date_input"
 )
 if isinstance(picked_date, tuple) and len(picked_date) == 2:
     start_date, end_date = picked_date
-    
-st.session_state["selected_date_range"] = start_date, end_date
 
 start_dt = datetime.combine(start_date, time.min) - timedelta(hours=2)
 end_dt = datetime.combine(end_date, time.max) - timedelta(hours=2)
@@ -99,16 +91,14 @@ sel_asset_ids, all_assets = multiselect.multi_with_all(
     key="assets"
 )
 
-# Derived combined labels (if you want to display/use later)
-selected_game_type_labels = [f"{d} {assets[a]}" for d in sel_durations 
-                             for a in sel_asset_ids]
-
-st.sidebar.write(selected_game_type_labels)
-
 st.sidebar.write("---")
 
 if st.sidebar.button("Refresh Data"):
     st.cache_data.clear()
+    st.rerun()
+
+if st.sidebar.button("Refresh Session"):
+    st.session_state.clear()
     st.rerun()
 
     
@@ -120,7 +110,6 @@ if page == "Overview":
 elif page == "Trader":
     Trader.render(
         start_dt, end_dt, 
-        default_trader
+        url_requested_trader
     )
 
-st.write(st.session_state)
