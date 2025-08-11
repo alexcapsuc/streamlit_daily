@@ -6,6 +6,14 @@ from lib.db import read_sql
 # from lib.ui import kpi_row
 
 
+def trader_link(tid):
+    st.page_link(
+        f"?page=Trader&trader_id={tid}",   # relative URL within the app
+        label=f"Open {tid}",               # looks/behaves like a link
+        icon=":material/open_in_new:"      # optional
+    )
+
+
 def render(start_dt_utc, end_dt_utc, all_assets, all_durations,
            sel_asset_ids, sel_duration_ids):
     st.title("Trading Platform Overview")
@@ -80,14 +88,18 @@ def render(start_dt_utc, end_dt_utc, all_assets, all_durations,
     #         ),
     #     }
     # )
+    
     # Display table rows with inline "Open" buttons
     c1, c2, c3, c4, c5, c6 = st.columns([3, 3, 3, 3, 3, 3])
     _ = (c1.write("Username"), c2.write("Player ID"), c3.write("Num Trades"),
          c4.write("Total Profit"), c5.write("Total Volume"))
     for _, row in df_top_traders.iterrows():
-        if c1.button(row["PLAYER_NAME"], key=f"open_{row['PLAYER_ID']}"):
-            st.query_params.update(page="Trader", trader_id=str(row["PLAYER_ID"]))
-            st.rerun()
+        # if c1.button(row["PLAYER_NAME"], key=f"open_{row['PLAYER_ID']}"):
+        #     st.query_params.update(page="Trader", trader_id=str(row["PLAYER_ID"]))
+        #     st.rerun()
+        with c1:
+            # trader_link(row["PLAYER_ID"]) 
+            st.markdown(f"[Open {row['PLAYER_ID']}](?page=Trader&trader_id={row['PLAYER_ID']})")
         c2.write(row["PLAYER_ID"])
         c3.write(f"${row['NUM_TRADES']:,.0f}")
         c4.write(f"${row['TRADER_PNL']:,.0f}")

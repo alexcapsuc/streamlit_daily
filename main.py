@@ -17,7 +17,6 @@ def sync_url_param():
         st.session_state.page = "Overview"
     if st.session_state.page != qp.get("page", "Overview"):
         # if st.session_state.page == 'Overview' and qp.get("page") == "Trader":
-        st.write(f"Updating URL param from {qp.get('page')} to {st.session_state.page}")
         st.query_params.update(page=st.session_state.page, trader_id=url_requested_trader)
 
 
@@ -58,7 +57,7 @@ st.sidebar.selectbox(
     "Quick Date Range",
     options=list(formats.date_ranges.keys()),
     key="selected_range",
-    # index=0  # default to the first one, e.g., "Today"
+    index=0  # default to the first one, e.g., "Today"
 )
 
 # Set start_date and end_date based on the selected range
@@ -98,6 +97,10 @@ if st.sidebar.button("Refresh Data"):
     st.rerun()
 
 if st.sidebar.button("Refresh Session"):
+    st.cache_data.clear()    
+    st.session_state.selected_range = "Today"
+    st.session_state.page = "Overview"
+    sync_url_param()
     st.session_state.clear()
     st.rerun()
 
