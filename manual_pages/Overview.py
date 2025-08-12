@@ -12,6 +12,12 @@ def trader_link(tid):
         label=f"Open {tid}",               # looks/behaves like a link
         icon=":material/open_in_new:"      # optional
     )
+    st.query_params.update(page="Trader", trader_id=str(tid))
+    st.rerun()
+
+def go_to_trader(tid):
+    st.query_params.update(page="Trader", trader_id=str(tid))
+    st.rerun()
 
 
 def render(start_dt_utc, end_dt_utc, all_assets, all_durations,
@@ -99,10 +105,14 @@ def render(start_dt_utc, end_dt_utc, all_assets, all_durations,
         #     st.rerun()
         with c1:
             # trader_link(row["PLAYER_ID"]) 
-            st.markdown(f"[Open {row['PLAYER_ID']}](?page=Trader&trader_id={row['PLAYER_ID']})")
+            st.markdown(f"[{row['PLAYER_NAME']}](?page=Trader&trader_id={row['PLAYER_ID']})")
         c2.write(row["PLAYER_ID"])
-        c3.write(f"${row['NUM_TRADES']:,.0f}")
-        c4.write(f"${row['TRADER_PNL']:,.0f}")
-        c5.write(f"${row['VOL']:,.0f}")
+        c3.write(f"{row['NUM_TRADES']:,.0f}")
+        c4.write(f"¥{row['TRADER_PNL']:,.0f}")
+        c5.write(f"¥{row['VOL']:,.0f}")
+        with c6:
+            if st.button("Open", key=f"open_{row['PLAYER_ID']}"):
+                go_to_trader(row['PLAYER_ID'])
+
         
 

@@ -19,6 +19,10 @@ def sync_url_param():
         # if st.session_state.page == 'Overview' and qp.get("page") == "Trader":
         st.query_params.update(page=st.session_state.page, trader_id=url_requested_trader)
 
+def go_to_page(page: str, trader_id: str | int = ""):
+    st.query_params.update(page=page, trader_id=str(trader_id))
+    st.rerun()
+
 
 # Read current URL params
 qp = st.query_params
@@ -31,6 +35,7 @@ assets = (
     dict(zip(df_assets["ASSET_ID"], df_assets["ASSET_NAME"]))
     if not df_assets.empty else formats.assets
 )
+st.session_state["assets_dict"] = assets
 asset_id_options = list(assets.keys())
 
 df_durations = db.read_sql(durations_list)
@@ -49,6 +54,9 @@ page = st.sidebar.segmented_control(
     key="page",
     on_change=sync_url_param
 )
+
+if page != url_requested_page:  # user clicked a new section
+    go_to_page(page, url_requested_page)
 
 st.sidebar.subheader("Filters")
 
@@ -97,8 +105,7 @@ if st.sidebar.button("Refresh Data"):
     st.rerun()
 
 if st.sidebar.button("Refresh Session"):
-    st.cache_data.clear()    
-    st.session_state.selected_range = "Today"
+    st.cache_data.clear()
     st.session_state.page = "Overview"
     sync_url_param()
     st.session_state.clear()
@@ -115,4 +122,7 @@ elif page == "Trader":
         start_dt, end_dt, 
         url_requested_trader
     )
+
+st.write('End')
+st.write(st.session_state)
 

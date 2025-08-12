@@ -220,7 +220,7 @@ def read_sql(sql: str, params: dict | None = None, profile: Optional[str] = None
                 safe_params[k] = v
         sql = sql.format(**safe_params)
         with st.expander('query:'):
-            st.write(sql)
+            st.code(sql)
     return session.sql(sql).to_pandas()
 
 
