@@ -1,5 +1,6 @@
 import streamlit as st
 from datetime import datetime, time, timedelta
+from pyecharts.commons.utils import JsCode
 
 
 today = (datetime.today() + timedelta(hours=2)).date()
@@ -20,3 +21,4 @@ durations = ['00:00:15', '00:00:30', '00:01:00', '00:03:00', '00:05:00',
 assets = {
     1: "USD/JPY"
 }
+

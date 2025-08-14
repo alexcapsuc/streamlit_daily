@@ -28,13 +28,6 @@ def render(start_dt_utc: datetime, end_dt_utc: datetime, selected_trader: str):
         st.info("Please enter a trader to view details.")
         return
 
-    if st.button("Show All Trades"):
-        show_trades(start_dt_utc, end_dt_utc, selected_trader)
-
-    if st.button("Show Trades on Graph") or "Trades Chart" in st.session_state.keep_elements:
-        st.session_state.keep_elements.append("Trades Chart")
-        plot_trades(start_dt_utc, end_dt_utc, selected_trader)
-
     sql_profile = Path("queries/trader_profile.sql").read_text()
     sql_profile = sql_profile.format(
         trader_id=trader_id,
@@ -44,6 +37,13 @@ def render(start_dt_utc: datetime, end_dt_utc: datetime, selected_trader: str):
     df_profile = read_sql(sql_profile)
 
     st.dataframe(df_profile, use_container_width=True)
+
+    if st.button("Show All Trades"):
+        show_trades(start_dt_utc, end_dt_utc, selected_trader)
+
+    if st.button("Show Trades on Graph") or "Trades Chart" in st.session_state.keep_elements:
+        st.session_state.keep_elements.append("Trades Chart")
+        plot_trades(start_dt_utc, end_dt_utc, selected_trader)
 
 def show_trades(start_dt_utc, end_dt_utc, selected_trader):
     trades = get_trades(start_dt_utc, end_dt_utc, selected_trader)
@@ -208,11 +208,13 @@ def _build_chart_echarts(trades: pd.DataFrame, ticks: pd.DataFrame):
     :return:
     """
     from streamlit_echarts import st_echarts
+    from pyecharts.commons.utils import JsCode
 
     def _to_iso(s: pd.Series) -> pd.Series:
         # ensure naive UTC ISO strings
         s = pd.to_datetime(s, utc=True).dt.tz_convert("UTC").dt.tz_localize(None)
-        return s.dt.strftime("%Y-%m-%dT%H:%M:%S")
+        # return s.dt.strftime("%Y-%m-%dT%H:%M:%S")
+        return s.astype('int64') / 10**9
 
     # Prepare datasets for ECharts (use array order to carry extra fields to tooltip)
     # ticks dataset [TIMESTAMP, PRICE]
@@ -234,28 +236,14 @@ def _build_chart_echarts(trades: pd.DataFrame, ticks: pd.DataFrame):
 
         # numerics
         trades["TRADING_STRIKE"] = trades["TRADING_STRIKE"].astype(float)
-        trades["CLOSE_STRIKE"] = trades["TRADING_STRIKE"].astype(float)
+        trades["CLOSE_STRIKE"] = trades["CLOSE_STRIKE"].astype(float)
         trades["VOLUME"] = trades["VOLUME"].astype(float)
         trades["PROFIT"] = trades["PROFIT"].astype(float)
+        trades["color"] = 'green'
+        trades.loc[trades["SIDE"] == "SELL", "color"] = 'red'
 
         ds_trades = trades[["TRADING_TIME","TRADING_STRIKE","CLOSE_TIME","CLOSE_STRIKE",
-                            "SIDE","VOLUME","PROFIT","DURATION","ASSET_ID"]].values.tolist()
-
-    # JS helpers: symbolSize by |pnl|, color by side
-    symbol_size_fn = """
-        function (val) {
-          const pnl = parseFloat(val[6]) || 0;
-          return Math.min(20, Math.max(6, Math.abs(pnl)));
-        }
-    """
-    color_fn = """
-        function (params) {
-            const side = params.data[4];
-            if (side === 'BUY')  return '#2e7d32';
-            if (side === 'SELL') return '#c62828';
-            return '#1976d2';
-        }
-    """
+                            "SIDE","VOLUME","PROFIT","DURATION","ASSET_ID","color"]].values.tolist()
 
     option = {
         "animation": False,
@@ -292,33 +280,34 @@ def _build_chart_echarts(trades: pd.DataFrame, ticks: pd.DataFrame):
                 "type": "scatter",
                 "datasetIndex": 1,
                 "encode": {"x": "tt", "y": "tstrike"},
-                "symbol": "circle",
-                # "symbolSize": """
-                #     function (data) {
-                #       return data[5] / 100;
-                #     }
-                # """ ,
+                "symbol": "pin",
+                "symbolSize":"""--x_x--0_0--
+                        function (data) { 
+                            return Number(Math.sqrt(data[5] / 1000) * 5).toFixed(2);
+                        }--x_x--0_0--
+                    """.replace('\n', ' '),
                 "itemStyle": {
-                    "color": """
-                        function (params) {
-                            const side = params.value[4];
-                            if (side === 'BUY') {return '#2e7d32';}
-                            if (side === 'SELL') {return '#c62828';}
-                            return 'green';
-                        }
-                    """
+                    "color": """--x_x--0_0--
+                        function (params) { 
+                            const side = params.data[4]; 
+                            if (side === 'BUY')  
+                                return 'green'; 
+                            if (side === 'SELL') 
+                                return 'red'; 
+                            return '#1976d2'; 
+                        }--x_x--0_0--
+                    """.replace('\n', ' ')
                 },
                 "tooltip": {
-                    "formatter": """
-                        function (p) {
-                          const d = p.data;
-                          return 'Open ' + d[0] +
-                                 '<br/>Strike: ' + d[1] +
-                                 '<br/>Side: ' + d[4] +
-                                 '<br/>Vol: '  + d[5] +
-                                 '<br/>PnL: '  + d[6];
-                        }
-                    """
+                    "formatter": """--x_x--0_0--
+                        function (params) {
+                            return 'Close ' 
+                                + '<br/>Strike: ' + params.data[3]
+                                + '<br/>Side: ' + params.data[4]
+                                + '<br/>Vol: ' + params.data[5]
+                                + '<br/>PnL: ' + params.data[6];
+                        }--x_x--0_0--
+                    """.replace('\n', ' ')
                 }
             },
             {   # close markers
@@ -328,7 +317,7 @@ def _build_chart_echarts(trades: pd.DataFrame, ticks: pd.DataFrame):
                 "encode": {"x": "ct", "y": "cstrike"},
                 "symbol": "pin",
                 "symbolKeepAspect": True,
-                # "symbolSize": symbol_size_fn,
+                "symbolSize": 20,
                 "itemStyle": {
                     "color": "blue",
                     "opacity": 0.85,
@@ -336,20 +325,14 @@ def _build_chart_echarts(trades: pd.DataFrame, ticks: pd.DataFrame):
                     "borderWidth": 0.5
                 },
                 "tooltip": {
-                    "formatter": """
-                        function (p) {
-                          const d = p.data;
-                          return 'Close ' + d[2] +
-                                 '<br/>Strike: ' + d[3] +
-                                 '<br/>Side: ' + d[4] +
-                                 '<br/>Vol: '  + d[5] +
-                                 '<br/>PnL: '  + d[6];
-                        }
-                    """
+                    "formatter": JsCode("function (params) {return 'Hello Tooltip!';}").js_code
                 }
             }
         ],
     }
+
+    with st.expander("ECharts Options"):
+        st.write(option)
 
     # Render chart + capture click/hover events
     events = {
@@ -357,8 +340,9 @@ def _build_chart_echarts(trades: pd.DataFrame, ticks: pd.DataFrame):
         "mouseover": "function(params) { return params; }"
     }
 
-    # st.write("Trades rows:", len(ds_trades), "example:", ds_trades[:2])
-    # st.write("Ticks rows:", len(ds_ticks), "example:", ds_ticks[:2])
+    with st.expander('Sample Data'):
+        st.write("Trades rows:", len(ds_trades), "example:", ds_trades[:2])
+        st.write("Ticks rows:", len(ds_ticks), "example:", ds_ticks[:2])
 
     # ev = st_echarts_event(option, events=events, height="420px", key=f"trade_group_chart")
     ev = st_echarts(option, events=events, height="420px", key="tg_chart")
@@ -376,7 +360,8 @@ def _build_chart_echarts(trades: pd.DataFrame, ticks: pd.DataFrame):
     # Optional: table + download for the group
     with st.expander("Show trades in this group"):
         if not trades.empty:
-            st.dataframe(trades[["TRADING_TIME","SIDE","TRADING_STRIKE","VOLUME","PROFIT","DURATION","ASSET_ID"]], use_container_width=True, hide_index=True)
+            st.dataframe(trades[["SIDE","TRADING_TIME","TRADING_STRIKE","CLOSE_TIME","CLOSE_STRIKE",
+                                 "VOLUME","PROFIT","DURATION","ASSET_ID"]], use_container_width=True, hide_index=True)
             st.download_button(
                 "Download CSV",
                 trades.to_csv(index=False).encode("utf-8"),
