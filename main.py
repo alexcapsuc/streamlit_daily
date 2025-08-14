@@ -48,7 +48,8 @@ st.sidebar.subheader("Section")
 
 # Looks like button pills, but acts like a radio
 page = st.sidebar.segmented_control(
-    "Section", 
+    "Section",
+    label_visibility="hidden",
     options=formats.sections, 
     default=url_requested_page,
     key="page",
@@ -56,7 +57,7 @@ page = st.sidebar.segmented_control(
 )
 
 if page != url_requested_page:  # user clicked a new section
-    go_to_page(page, url_requested_page)
+    go_to_page(page, url_requested_trader)
 
 st.sidebar.subheader("Filters")
 
@@ -102,16 +103,9 @@ st.sidebar.write("---")
 
 if st.sidebar.button("Refresh Data"):
     st.cache_data.clear()
-    st.rerun()
-
-if st.sidebar.button("Refresh Session"):
-    st.cache_data.clear()
-    st.session_state.page = "Overview"
-    sync_url_param()
     st.session_state.clear()
     st.rerun()
 
-    
 if page == "Overview":
     Overview.render(
         start_dt, end_dt, 

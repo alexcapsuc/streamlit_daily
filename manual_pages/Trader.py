@@ -1,7 +1,9 @@
 import streamlit as st
 from pathlib import Path
 import pandas as pd
+import numpy as np
 from datetime import datetime, timedelta
+import pyarrow.lib
 
 
 from lib.db import read_sql
@@ -60,7 +62,7 @@ def get_trades(start_dt_utc, end_dt_utc, selected_trader):
     return trades
 
 def plot_trades(start_dt_utc, end_dt_utc, selected_trader,
-                grouping_gap_threshold=60):
+                grouping_gap_threshold=60, engine='plotly'):
     trades =  get_trades(start_dt_utc, end_dt_utc, selected_trader)
     if trades.empty:
         st.info("No trades found for the selected filters.")
@@ -98,9 +100,68 @@ def plot_trades(start_dt_utc, end_dt_utc, selected_trader,
                f"• &nbsp;&nbsp; Asset {st.session_state['assets_dict'][asset_id]} &nbsp;&nbsp; "
                f"• &nbsp;&nbsp; Window {g_from} → {g_to} &nbsp;&nbsp; • &nbsp;&nbsp; {cur_group.shape[0]} Trade(s)")
 
-    _build_trades_chart(cur_group, ticks)
+    _build_trades_chart(cur_group, ticks, engine)
 
-def _build_trades_chart(trades: pd.DataFrame, ticks: pd.DataFrame, engine="ECharts"):
+def _to_iso(s: pd.Series) -> pd.Series:
+    # ensure naive UTC ISO strings
+    s = pd.to_datetime(s, utc=True).dt.tz_convert("UTC").dt.tz_localize(None)
+    return s.dt.strftime("%Y-%m-%dT%H:%M:%S")
+
+def _to_epoch_ms(s: pd.Series) -> pd.Series:
+    # pandas datetime -> int64 ns -> int ms (Python ints for JSON)
+    ms = (pd.to_datetime(s, utc=True).astype("int64") // 10 ** 6)
+    # ensure Python int, not numpy int64 (better for JSON)
+    return ms.astype("int64").map(int)
+
+def _to_dt_from_ms(ms: pd.Series) -> pd.Series:
+    # epoch ms -> pandas datetime (UTC, tz-naive for Plotly)
+    return pd.to_datetime(ms, unit="ms", utc=True).dt.tz_convert("UTC").dt.tz_localize(None)
+
+def _prep_for_chart(trades: pd.DataFrame, ticks: pd.DataFrame):
+    """
+    Returns:
+      ticks_dt  : DataFrame [TS, PRICE] (datetime)
+      trades_dt : DataFrame with columns:
+                  TT (open time dt), TSTRIKE, CT (close time dt), CSTRIKE,
+                  SIDE, VOL, PNL, DUR, ASSET, SIZE (sqrt |pnl| scaling), COLOR
+    """
+    # --- ticks
+    ticks_dt = pd.DataFrame(columns=["TIMESTAMP","PRICE"])
+    if not ticks.empty:
+        ticks_dt = ticks.copy()
+        ticks_dt["PRICE"] = ticks_dt["PRICE"].astype(float)
+        ticks_dt["PRICE"] = pd.to_numeric(ticks_dt["PRICE"], errors="coerce")
+        ticks_dt = ticks_dt[["TIMESTAMP","PRICE"]].sort_values("TIMESTAMP").reset_index()
+
+    # --- trades
+    trades_dt = pd.DataFrame(columns=["TRADING_TIME","TRADING_STRIKE","CLOSE_TIME","CLOSE_STRIKE",
+                                      "SIDE","VOLUME","PROFIT","DURATION","ASSET_ID","SIZE","COLOR"])
+    if not trades.empty:
+        # numerics & fields
+        trades_dt = trades.copy()
+        trades_dt["TRADING_STRIKE"] = trades_dt["TRADING_STRIKE"].astype(float)
+        trades_dt["CLOSE_STRIKE"] = trades_dt["CLOSE_STRIKE"].astype(float)
+        trades_dt["VOLUME"] = trades_dt["VOLUME"].astype(float)
+        trades_dt["PROFIT"] = trades_dt["PROFIT"].astype(float)
+
+        # size by |pnl| (tune scale)
+        trades_dt["SIZE"] = 10 + 4 * np.sqrt(trades_dt["VOLUME"] / 1000)
+        trades_dt["SIZE"] = trades_dt["SIZE"].clip(lower=5, upper=100)
+
+        # color by side
+        trades_dt["COLOR"] = np.where(trades_dt["SIDE"].astype(str).str.upper().eq("BUY"), "#2e7d32",
+                                   np.where(trades_dt["SIDE"].astype(str).str.upper().eq("SELL"),
+                                            "#c62828", "#1976d2"))
+
+        trades_dt = trades_dt.sort_values(["TRADING_TIME", "CLOSE_TIME"])
+
+        for col in ["TRADING_STRIKE", "CLOSE_STRIKE", "VOLUME", "PROFIT", "ASSET_ID", "SIZE"]:
+            # trades_dt[col] = trades_dt[col].astype(str)
+            trades_dt[col] = pd.to_numeric(trades_dt[col], errors="coerce")
+
+    return trades_dt, ticks_dt
+
+def _build_trades_chart(trades: pd.DataFrame, ticks: pd.DataFrame, engine):
     """
     Constructs the actual graph. Switch to use ECharts / Plotly / other
     :param trades: DataFrame with trades (columns: )
@@ -109,96 +170,114 @@ def _build_trades_chart(trades: pd.DataFrame, ticks: pd.DataFrame, engine="EChar
     :return:
     """
     if engine.lower() == "plotly":
-        _build_chart_plotly(trades, ticks)
+        try:
+            _build_chart_plotly(trades, ticks)
+        except pyarrow.lib.ArrowInvalid as err:
+            st.write(f"PyArrow Error: {err}")
+
     else:
         _build_chart_echarts(trades, ticks)
 
 def _build_chart_plotly(trades: pd.DataFrame, ticks: pd.DataFrame):
     import plotly.graph_objects as go
-    from streamlit_plotly_events import plotly_events
+    # Optional: capture clicks (pip install streamlit-plotly-events)
+    try:
+        from streamlit_plotly_events import plotly_events
+    except Exception:
+        plotly_events = None
+
+    trades_dt, ticks_dt = _prep_for_chart(trades, ticks)
+    # ticks_dt = ticks_dt.astype(str)
+
+    with st.expander('Sample Data'):
+        st.write("Trades rows:", trades_dt.shape[0], "example:", trades_dt.head())
+        st.write("Ticks rows:", ticks_dt.shape[0], "example:", ticks_dt.head())
 
     fig = go.Figure()
 
-    # Plot the price line
-    if not ticks.empty:
-        fig.add_trace(
-            go.Scatter(
-                x=ticks["TIMESTAMP"],
-                y=ticks["PRICE"],
-                mode="lines",
-                name="Price",
-                line=dict(width=1),
-                hoverinfo="x+y"
-            )
-        )
+    # Price line
+    if not ticks_dt.empty:
+        st.write(ticks_dt.dtypes.astype(str).rename("dtype").to_frame())
+        fig.add_trace(go.Scatter(
+            x=ticks_dt["TIMESTAMP"], y=[price for price in ticks_dt["PRICE"].values],
+            mode="lines", name="Price",
+            line=dict(width=1),
+            hovertemplate="%{x|%Y-%m-%d %H:%M:%S.%3f}<br>Price=%{y}<extra></extra>",
+        ))
 
-    # Plot trades
-    if not trades.empty:
-        trades = trades.sort_values("TRADING_TIME")
-        side_colors = {"BUY": "#2e7d32", "SELL": "#c62828"}
-        colors = trades["SIDE"].map(lambda s: side_colors.get(s, "#1976d2"))
+    # Open markers
+    if not trades_dt.empty:
+        fig.add_trace(go.Scatter(
+            x=trades_dt["TRADING_TIME"], y=[strike for strike in trades_dt["TRADING_STRIKE"].values],
+            mode="markers", name="Open",
+            marker=dict(color=trades_dt["COLOR"],
+                        # size=[float(val) for val in trades_dt["SIZE"].values],
+                        line=dict(width=0.5, color="black"), opacity=0.9, symbol="circle"),
+            customdata=np.stack([
+                trades_dt["SIDE"], trades_dt["VOLUME"], trades_dt["PROFIT"],
+                trades_dt["DURATION"], trades_dt["ASSET_ID"], trades_dt["CLOSE_TIME"], trades_dt["CLOSE_STRIKE"]
+            ], axis=1),
+            hovertemplate=(
+                "Open %{x|%Y-%m-%d %H:%M:%S.%3f}"
+                "<br>Strike=%{y}"
+                "<br>Side=%{customdata[0]}"
+                "<br>Vol=%{customdata[1]:,.0f}"
+                "<br>PnL=%{customdata[2]:,.2f}"
+                "<extra></extra>"
+            ),
+        ))
 
-        sizes = trades["PROFIT"].fillna(0).abs().clip(lower=6, upper=18)
+        # Close markers (triangle)
+        fig.add_trace(go.Scatter(
+            x=trades_dt["CLOSE_TIME"], y=[strike for strike in trades_dt["CLOSE_STRIKE"].values],
+            mode="markers", name="Close",
+            marker=dict(color=trades_dt["COLOR"],
+                        # size=10,
+                        line=dict(width=0.5, color="black"), opacity=0.9, symbol="triangle-up"),
+            customdata=np.stack([
+                trades_dt["SIDE"], trades_dt["VOLUME"], trades_dt["PROFIT"],
+                trades_dt["DURATION"], trades_dt["ASSET_ID"], trades_dt["TRADING_TIME"], trades_dt["TRADING_STRIKE"]
+            ], axis=1),
+            hovertemplate=(
+                "Close %{x|%Y-%m-%d %H:%M:%S.%3f}"
+                "<br>Strike=%{y}"
+                "<br>Side=%{customdata[0]}"
+                "<br>Vol=%{customdata[1]:,.0f}"
+                "<br>PnL=%{customdata[2]:,.2f}"
+                "<extra></extra>"
+            ),
+        ))
 
-        hover_texts = (
-            "Time: " + trades["TRADING_TIME"].astype(str) +
-            "<br>Price: " + trades["TRADING_STRIKE"].astype(str) +
-            "<br>Side: " + trades["SIDE"] +
-            "<br>Volume: " + trades["VOLUME"].astype(str) +
-            "<br>PnL: " + trades["PROFIT"].astype(str)
-        )
-
-        fig.add_trace(
-            go.Scatter(
-                x=trades["TRADING_TIME"],
-                y=trades["TRADING_STRIKE"],
-                mode="markers",
-                name="Trades",
-                marker=dict(
-                    size=sizes,
-                    color=colors,
-                    opacity=0.8,
-                    line=dict(width=0.5, color="black"),
-                ),
-                hovertext=hover_texts,
-                customdata=trades[["TRADING_TIME", "TRADING_STRIKE", "SIDE", "VOLUME", "PROFIT", "DURATION", "ASSET_ID"]],
-            )
-        )
-
+    # Layout with ms tick formatting + range slider
     fig.update_layout(
-        xaxis_title="Time",
-        yaxis_title="Price",
-        height=500,
+        height=520,
+        margin=dict(l=40, r=20, t=30, b=40),
         hovermode="closest",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        margin=dict(l=40, r=20, t=40, b=40),
+        xaxis=dict(
+            title="Time",
+            showspikes=True,
+            spikemode="across",
+            rangeslider=dict(visible=True),
+            tickformat="%Y-%m-%d %H:%M:%S.%3f",  # millisecond labels
+            tickformatstops=[
+                dict(dtickrange=[None, 1000], value="%H:%M:%S.%3f"),
+                dict(dtickrange=[1000, 60000], value="%H:%M:%S.%3f"),
+                dict(dtickrange=[60000, None], value="%Y-%m-%d %H:%M:%S"),
+            ],
+        ),
+        yaxis=dict(title="Price", showspikes=True, spikemode="toaxis+across"),
     )
 
-    # Use streamlit-plotly-events to capture clicks
-    selected_points = plotly_events(fig, click_event=True, hover_event=False, select_event=False, key="plotly-trade-click")
-
-    # Handle click event
-    if selected_points:
-        selected = selected_points[0]  # Get first click
-        custom_data = selected["customdata"]
-        st.info(f"Clicked Trade:\n\n• Time: {custom_data[0]}\n• Price: {custom_data[1]}\n• Side: {custom_data[2]}\n• Volume: {custom_data[3]}\n• PnL: {custom_data[4]}\n• Duration ID: {custom_data[5]}\n• Asset ID: {custom_data[6]}")
-
-    # Show table + download
-    with st.expander("Show trades in this group"):
-        if not trades.empty:
-            st.dataframe(
-                trades[["TRADING_TIME", "SIDE", "TRADING_STRIKE", "VOLUME", "PROFIT", "DURATION", "ASSET_ID"]],
-                use_container_width=True,
-                hide_index=True
-            )
-            st.download_button(
-                "Download CSV",
-                trades.to_csv(index=False).encode("utf-8"),
-                file_name=f"trader_{-1}_asset_{-1}_group_{-1}.csv",
-                mime="text/csv"
-            )
-        else:
-            st.write("No trades in this group.")
+    # Render (with optional click capture)
+    if plotly_events:
+        selected = plotly_events(fig, click_event=True, hover_event=False, select_event=False, key="plotly-trade-click")
+        if selected:
+            p = selected[0]
+            # Example: p["pointIndex"], p["curveNumber"], p["x"], p["y"], p["customdata"]
+            st.info(f"Clicked • x={p.get('x')} • y={p.get('y')} • data={p.get('customdata')}")
+    else:
+        st.plotly_chart(fig, use_container_width=True)
 
 def _build_chart_echarts(trades: pd.DataFrame, ticks: pd.DataFrame):
     """
@@ -208,13 +287,6 @@ def _build_chart_echarts(trades: pd.DataFrame, ticks: pd.DataFrame):
     :return:
     """
     from streamlit_echarts import st_echarts
-    from pyecharts.commons.utils import JsCode
-
-    def _to_iso(s: pd.Series) -> pd.Series:
-        # ensure naive UTC ISO strings
-        s = pd.to_datetime(s, utc=True).dt.tz_convert("UTC").dt.tz_localize(None)
-        # return s.dt.strftime("%Y-%m-%dT%H:%M:%S")
-        return s.astype('int64') / 10**9
 
     # Prepare datasets for ECharts (use array order to carry extra fields to tooltip)
     # ticks dataset [TIMESTAMP, PRICE]
@@ -222,7 +294,7 @@ def _build_chart_echarts(trades: pd.DataFrame, ticks: pd.DataFrame):
     if not ticks.empty:
         ticks = ticks.sort_values("TIMESTAMP").reset_index()
         for col_name in ["TIMESTAMP", "SENDER_TIMESTAMP"]:
-            ticks[col_name] = _to_iso(ticks[col_name])
+            ticks[col_name] = _to_epoch_ms(ticks[col_name])
         ticks["PRICE"] = ticks["PRICE"].astype(float)
         ds_ticks = ticks[["TIMESTAMP", "PRICE"]].values.tolist()
 
@@ -232,7 +304,7 @@ def _build_chart_echarts(trades: pd.DataFrame, ticks: pd.DataFrame):
         # times
         trades = trades.sort_values("TRADING_TIME")
         for col_name in ["TRADING_TIME", "CLOSE_TIME"]:
-            trades[col_name] = _to_iso(trades[col_name])
+            trades[col_name] = _to_epoch_ms(trades[col_name])
 
         # numerics
         trades["TRADING_STRIKE"] = trades["TRADING_STRIKE"].astype(float)
@@ -247,22 +319,34 @@ def _build_chart_echarts(trades: pd.DataFrame, ticks: pd.DataFrame):
 
     option = {
         "animation": False,
-        "tooltip": {"trigger": "axis", "axisPointer": {"type": "cross"}},
+        # "tooltip": {"trigger": "axis", "axisPointer": {"type": "cross"}},
+        # "tooltip": {
+        #     "trigger": "item",          # ← IMPORTANT: 'item', not 'axis'
+        #     "confine": True             # avoids clipping in Streamlit iframe
+        # },
         "legend": {"data": ["Price", "Open", "Close"]},
-        "grid": {"left": 45, "right": 20, "top": 30, "bottom": 60},
+        "grid": {"left": 45, "right": 20, "top": 30, "bottom": 70},
         "dataZoom": [
             {"type": "inside", "xAxisIndex": 0},
             {"type": "slider", "xAxisIndex": 0},
         ],
         "xAxis": {
             "type": "time",
-            "axisLabel": {"rotate": 0},
+            "axisLabel": {
+                "rotate": 0,
+                "formatter": """--x_x--0_0--
+                    function (value) {
+                        var tt = new Date(value);
+                        return tt.toISOString().slice(0, 23).replace("T", " ")
+                    }--x_x--0_0--
+                """.replace('\n', ' ')
+            }
         },
         "yAxis": [
             {"type": "value", "scale": True, "axisLabel": {"formatter": "{value}"}},
         ],
         "dataset": [
-            {"id": "ticks",  "source": ds_ticks,  "dimensions": ["ts","price"]},
+            {"id": "ticks", "source": ds_ticks, "dimensions": ["ts","price"]},
             {"id": "trades", "source": ds_trades, "dimensions": ["tt","tstrike","ct","cstrike","side","vol","pnl","dur","asset"]},
         ],
         "series": [
@@ -273,7 +357,7 @@ def _build_chart_echarts(trades: pd.DataFrame, ticks: pd.DataFrame):
                 "encode": {"x": "ts", "y": "price"},
                 "symbol": "none",
                 "step": "start",
-                "lineStyle": {"width": 1}
+                "lineStyle": {"width": 1},
             },
             {   # open markers
                 "name": "Open",
@@ -283,7 +367,7 @@ def _build_chart_echarts(trades: pd.DataFrame, ticks: pd.DataFrame):
                 "symbol": "pin",
                 "symbolSize":"""--x_x--0_0--
                         function (data) { 
-                            return Number(Math.sqrt(data[5] / 1000) * 5).toFixed(2);
+                            return Number(10 + 3 * Math.sqrt(data[5] / 1000)).toFixed(2);
                         }--x_x--0_0--
                     """.replace('\n', ' '),
                 "itemStyle": {
@@ -299,10 +383,12 @@ def _build_chart_echarts(trades: pd.DataFrame, ticks: pd.DataFrame):
                     """.replace('\n', ' ')
                 },
                 "tooltip": {
+                    "trigger": "item",
                     "formatter": """--x_x--0_0--
                         function (params) {
-                            return 'Close ' 
-                                + '<br/>Strike: ' + params.data[3]
+                            var tt = new Date(params.data[0]);
+                            return 'Open: ' + tt.toISOString().slice(0, 23).replace("T", " ")
+                                + '<br/>Strike: ' + params.data[1]
                                 + '<br/>Side: ' + params.data[4]
                                 + '<br/>Vol: ' + params.data[5]
                                 + '<br/>PnL: ' + params.data[6];
@@ -325,10 +411,32 @@ def _build_chart_echarts(trades: pd.DataFrame, ticks: pd.DataFrame):
                     "borderWidth": 0.5
                 },
                 "tooltip": {
-                    "formatter": JsCode("function (params) {return 'Hello Tooltip!';}").js_code
+                    "trigger": "item",
+                    "formatter": """--x_x--0_0--
+                        function (params) {
+                            var tt = new Date(params.data[2]);
+                            return 'Close: ' + tt.toISOString().slice(0, 23).replace("T", " ")
+                                + '<br/>Strike: ' + params.data[3]
+                                + '<br/>Side: ' + params.data[4]
+                                + '<br/>Vol: ' + params.data[5]
+                                + '<br/>PnL: ' + params.data[6];
+                        }--x_x--0_0--
+                    """.replace('\n', ' ')
                 }
             }
         ],
+        "tooltip": {
+            "trigger": "axis",
+            "axisPointer": {"type": "cross"},
+            # "formatter": JsCode(
+            #     """--x_x--0_0--
+            #         function (value) {
+            #             var tt = new Date(value);
+            #             return tt.toISOString().slice(0, 23).replace("T", " ")
+            #         }--x_x--0_0--
+            #     """
+            # ).js_code.replace('\n', ' ')
+        }
     }
 
     with st.expander("ECharts Options"):
