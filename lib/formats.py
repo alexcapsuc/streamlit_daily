@@ -3,8 +3,6 @@ from datetime import datetime, time, timedelta
 from pyecharts.commons.utils import JsCode
 
 
-# Check the active theme
-current_theme = st.context.theme.type
 today = (datetime.today() + timedelta(hours=2)).date()
 
 ALL = "__ALL__"
@@ -33,11 +31,13 @@ colors_all = {
         "lose": "red"
     },
     "light": {
-        "background_area": "rgb(150, 150, 150, .1)",
+        "background_area": "rgb(220, 220, 220, .1)",
         "normal line": "black",
         "normal reverted line": "white",
         "win": "green",
         "lose": "red"
     }
 }
-colors_context = colors_all[current_theme]
+
+colors_context = colors_all["dark" if st.context.theme.type == "dark" else "light"]
+
