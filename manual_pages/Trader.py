@@ -7,6 +7,7 @@ import pyarrow.lib
 
 
 from lib.db import read_sql
+from lib.formats import colors_context
 from queries.trader_sql import queries
 
 
@@ -264,7 +265,7 @@ def _build_chart_plotly(trades: pd.DataFrame, ticks: pd.DataFrame):
             marker=dict(color=trades_dt["COLOR"],
                         # size=[float(val) for val in trades_dt["SIZE"].values],
                         size=20,
-                        line=dict(width=0.5, color="black"),
+                        line=dict(width=0.5, color=colors_context["normal reverted line"]),
                         opacity=0.5,
                         # symbol=trades_dt["OPEN_MARKER"]),
                         symbol=trades_dt["OPEN_MARKER"].values),
@@ -289,7 +290,7 @@ def _build_chart_plotly(trades: pd.DataFrame, ticks: pd.DataFrame):
             mode="markers", name="Close",
             marker=dict(color=trades_dt["COLOR"],
                         size=20,
-                        line=dict(width=0.5, color="black"),
+                        line=dict(width=0.5, color=colors_context["normal reverted line"]),
                         opacity=0.5,
                         symbol="circle-dot"),
             customdata=np.stack([

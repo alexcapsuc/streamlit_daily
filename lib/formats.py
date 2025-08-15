@@ -3,6 +3,8 @@ from datetime import datetime, time, timedelta
 from pyecharts.commons.utils import JsCode
 
 
+# Check the active theme
+current_theme = st.context.theme.type
 today = (datetime.today() + timedelta(hours=2)).date()
 
 ALL = "__ALL__"
@@ -22,3 +24,20 @@ assets = {
     1: "USD/JPY"
 }
 
+colors_all = {
+    "dark": {
+        "background_area": "rgb(50, 50, 50, .1)",
+        "normal line": "white",
+        "normal reverted line": "black",
+        "win": "green",
+        "lose": "red"
+    },
+    "light": {
+        "background_area": "rgb(150, 150, 150, .1)",
+        "normal line": "black",
+        "normal reverted line": "white",
+        "win": "green",
+        "lose": "red"
+    }
+}
+colors_context = colors_all[current_theme]

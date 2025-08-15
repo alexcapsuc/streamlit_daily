@@ -4,6 +4,7 @@ import plotly.graph_objects as go
 
 
 from lib.db import read_sql
+from lib.formats import colors_context
 # from lib.ui import kpi_row
 from queries.overview_sql import queries
 
@@ -48,7 +49,7 @@ def _show_trader_history(trader_data_orig, start_dt_utc, end_dt_utc):
             name="Volume",
             fill="tozeroy",
             fillcolor="rgb(50, 50, 50, .1)",
-            line=dict(width=1, shape='hvh', color="rgb(50, 50, 50, .1)"),
+            line=dict(width=1, shape='hvh', color=colors_context["background_area"]),
             connectgaps=True,
             hovertemplate="%{x|%b %Y}<br>Volume = %{y}<extra></extra>",
         ))
@@ -56,7 +57,7 @@ def _show_trader_history(trader_data_orig, start_dt_utc, end_dt_utc):
             x=trader_data["MM"],
             y=trader_data["pnl"].values,
             mode="lines",
-            line=dict(width=1, shape='hvh', color="white"),
+            line=dict(width=1, shape='hvh', color=colors_context["normal line"]),
             name="Profit",
             connectgaps=True,
             hovertemplate="%{x|%b %Y}<br>PnL = %{y}<extra></extra>",
@@ -65,7 +66,7 @@ def _show_trader_history(trader_data_orig, start_dt_utc, end_dt_utc):
             x=trader_data["MM"],
             y=trader_data["dep"].values,
             mode="lines",
-            line=dict(width=1, shape='hvh', color="green"),
+            line=dict(width=1, shape='hvh', color=colors_context["win"]),
             # fill="tozeroy",
             # fillcolor="rgb(100, 110, 250, .1)",
             name="Dep",
@@ -76,7 +77,7 @@ def _show_trader_history(trader_data_orig, start_dt_utc, end_dt_utc):
             x=trader_data["MM"],
             y=trader_data["wd"].values,
             mode="lines",
-            line=dict(width=1, shape='hvh', color="red"),
+            line=dict(width=1, shape='hvh', color=colors_context["lose"]),
             # fill="tozeroy",
             # fillcolor="rgb(250, 110, 100, .1)",
             name="WD",
