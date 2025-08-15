@@ -1,17 +1,11 @@
 from __future__ import annotations
-
 import os
 from datetime import date, time, datetime, timedelta
 from pathlib import Path
 from typing import Optional, Dict, Any
-
 import streamlit as st
-
-# Snowpark
 from snowflake.snowpark import Session
-
-# Python 3.11 stdlib TOML reader
-import tomllib
+import tomllib  # Python 3.11 stdlib TOML reader
 
 # Optional: key-pair auth. Only used if you set private_key_path in the creds file.
 try:
@@ -22,9 +16,8 @@ except Exception:
     _CRYPTO_OK = False
 
 
-# -------------------------------
-# Paths & Profiles
-# -------------------------------
+session = None
+
 
 def _default_cred_paths() -> list[Path]:
     """
@@ -46,11 +39,9 @@ def _default_cred_paths() -> list[Path]:
         home / ".snowflake" / "creds.toml",
     ]
 
-
 def _load_toml(path: Path) -> dict:
     with path.open("rb") as f:
         return tomllib.load(f)
-
 
 def _load_creds(profile: Optional[str] = None) -> tuple[dict, str]:
     """
@@ -104,7 +95,6 @@ def _load_creds(profile: Optional[str] = None) -> tuple[dict, str]:
         "Set SNOWFLAKE_CRED_PATH or create secrets/snowflake.toml"
     )
 
-
 def _maybe_load_private_key(path: str, passphrase: Optional[str]) -> Optional[bytes]:
     """
     Load a PKCS8 private key for key-pair auth. Returns the PEM bytes to pass to connector.
@@ -126,11 +116,6 @@ def _maybe_load_private_key(path: str, passphrase: Optional[str]) -> Optional[by
         encryption_algorithm=serialization.NoEncryption(),
     )
 
-
-# -------------------------------
-# Session creation (smart)
-# -------------------------------
-
 def _in_sis() -> bool:
     """
     Heuristic: if we can import `get_active_session` and it returns a session, we're in SiS.
@@ -142,7 +127,6 @@ def _in_sis() -> bool:
         return True
     except Exception:
         return False
-
 
 def _create_local_session(creds: dict) -> Session:
     """
@@ -178,7 +162,6 @@ def _create_local_session(creds: dict) -> Session:
 
     return Session.builder.configs(cfg).create()
 
-
 @st.cache_resource(show_spinner=False)
 def get_session(profile: Optional[str] = None) -> Session:
     """
@@ -195,11 +178,6 @@ def get_session(profile: Optional[str] = None) -> Session:
     creds, prof_used = _load_creds(profile)
     return _create_local_session(creds)
 
-
-# -------------------------------
-# Query helpers
-# -------------------------------
-
 @st.cache_data(ttl=60, show_spinner=False)
 def read_sql(sql: str, params: dict | None = None, profile: Optional[str] = None):
     """
@@ -208,7 +186,9 @@ def read_sql(sql: str, params: dict | None = None, profile: Optional[str] = None
     Dates/timestamps/strings are auto-quoted here; numbers pass as-is.
     Works in SiS and local Streamlit
     """
-    session = get_session(profile)
+    # session = get_session(profile)
+    global session
+
     if params:
         safe_params = {}
         for k, v in params.items():
@@ -221,8 +201,12 @@ def read_sql(sql: str, params: dict | None = None, profile: Optional[str] = None
         sql = sql.format(**safe_params)
         with st.expander('query:'):
             st.code(sql)
-    return session.sql(sql).to_pandas()
 
+    try:
+        return session.sql(sql).to_pandas()
+    except:
+        session = get_session(profile)
+        return session.sql(sql).to_pandas()
 
 def execute_sql(sql: str, *, profile: Optional[str] = None):
     """

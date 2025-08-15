@@ -49,7 +49,7 @@ st.sidebar.subheader("Section")
 # Looks like button pills, but acts like a radio
 page = st.sidebar.segmented_control(
     "Section",
-    label_visibility="hidden",
+    label_visibility="collapsed",
     options=formats.sections, 
     default=url_requested_page,
     key="page",
@@ -117,6 +117,6 @@ elif page == "Trader":
         url_requested_trader
     )
 
-st.write('End')
-st.write(st.session_state)
+with st.expander("END"):
+    st.write(st.session_state)
 

@@ -1,16 +1,18 @@
 import streamlit as st
 from pathlib import Path
+import plotly.graph_objects as go
 
 
 from lib.db import read_sql
 # from lib.ui import kpi_row
+from queries.overview_sql import queries
 
 
 def trader_link(tid):
     st.page_link(
-        f"?page=Trader&trader_id={tid}",   # relative URL within the app
+        page=f"?page=Trader&trader_id={tid}",   # relative URL within the app
         label=f"Open {tid}",               # looks/behaves like a link
-        icon=":material/open_in_new:"      # optional
+        # icon=":material/open_in_new:"      # optional
     )
     st.query_params.update(page="Trader", trader_id=str(tid))
     st.rerun()
@@ -19,6 +21,71 @@ def go_to_trader(tid):
     st.query_params.update(page="Trader", trader_id=str(tid))
     st.rerun()
 
+def _show_trader_history(trader_data_orig, start_dt_utc, end_dt_utc):
+    """
+    Shows trader's monthly history (volume, pnl, dep/wd)
+    :param trader_data:
+    :param start_dt_utc:
+    :param end_dt_utc:
+    :return:
+    """
+    trader_data = trader_data_orig.copy()
+    trader_data["pnl"] = (trader_data["INCOME"] - trader_data["INVEST"]).cumsum()
+    trader_data["dep"] = (trader_data["DEPOSIT"]).cumsum()
+    trader_data["wd"] = (trader_data["WITHDRAWAL"]).cumsum()
+
+    with st.expander('Sample Data', width=1800):
+        st.write(f"Trades rows: {trader_data.shape[0]}, example rows: ")
+        st.dataframe(trader_data.head(100))
+
+    fig = go.Figure()
+
+    if not trader_data.empty:
+        fig.add_trace(go.Scatter(
+            x=trader_data["MM"],
+            y=trader_data["INVEST"].values,
+            mode="lines",
+            name="Volume",
+            fill="tozeroy",
+            fillcolor="rgb(50, 50, 50, .1)",
+            line=dict(width=1, shape='hvh', color="rgb(50, 50, 50, .1)"),
+            connectgaps=True,
+            hovertemplate="%{x|%b %Y}<br>Volume = %{y}<extra></extra>",
+        ))
+        fig.add_trace(go.Scatter(
+            x=trader_data["MM"],
+            y=trader_data["pnl"].values,
+            mode="lines",
+            line=dict(width=1, shape='hvh', color="white"),
+            name="Profit",
+            connectgaps=True,
+            hovertemplate="%{x|%b %Y}<br>PnL = %{y}<extra></extra>",
+        ))
+        fig.add_trace(go.Scatter(
+            x=trader_data["MM"],
+            y=trader_data["dep"].values,
+            mode="lines",
+            line=dict(width=1, shape='hvh', color="green"),
+            # fill="tozeroy",
+            # fillcolor="rgb(100, 110, 250, .1)",
+            name="Dep",
+            connectgaps=True,
+            hovertemplate="%{x|%b %Y}<br>Deposits = %{y}<extra></extra>",
+        ))
+        fig.add_trace(go.Scatter(
+            x=trader_data["MM"],
+            y=trader_data["wd"].values,
+            mode="lines",
+            line=dict(width=1, shape='hvh', color="red"),
+            # fill="tozeroy",
+            # fillcolor="rgb(250, 110, 100, .1)",
+            name="WD",
+            connectgaps=True,
+            hovertemplate="%{x|%b %Y}<br>Withdrawals = %{y}<extra></extra>",
+        ))
+
+
+    st.plotly_chart(fig, use_container_width=True)
 
 def render(start_dt_utc, end_dt_utc, all_assets, all_durations,
            sel_asset_ids, sel_duration_ids):
@@ -39,22 +106,13 @@ def render(start_dt_utc, end_dt_utc, all_assets, all_durations,
 
     # kpi_row(df_kpi)
 
-    col1, col2, col3, col4, col5 = st.columns(5)
-    if df_kpi is None or df_kpi.empty:
-        vals = [0,0,0,0,0]
-    else:
-        vals = [
-            df_kpi.loc[0, "NUM_TRADES"] or 0,
-            df_kpi.loc[0, "NUM_TRADERS"] or 0,
-            df_kpi.loc[0, "SITE_PROFITS"] or 0,
-            df_kpi.loc[0, "SITE_VOLUME"] or 0,
-            (df_kpi.loc[0, "MARGIN"] or 0) * 100
-        ]
-    col1.metric("Total Trades", f"${vals[0]:,.0f}")
-    col2.metric("Total Traders", f"${vals[1]:,.0f}")
-    col3.metric("Total Profit", f"${vals[3]:,.0f}")
-    col4.metric("Trading Volume", f"${vals[2]:,.0f}")
-    col5.metric("Margin", f"{vals[4]:.2f}%")
+    col1, col2, col3, col4, col5 = st.columns([30, 30, 40, 40, 20])
+    if df_kpi is not None and not df_kpi.empty:
+        col1.metric("Total Trades", f"{df_kpi.loc[0, 'NUM_TRADES']:,.0f}")
+        col2.metric("Total Traders", f"{df_kpi.loc[0, 'NUM_TRADERS']:,.0f}")
+        col3.metric("Total Profit", f"¥{df_kpi.loc[0, 'SITE_PROFITS']:,.0f}")
+        col4.metric("Trading Volume", f"¥{df_kpi.loc[0, 'SITE_VOLUME']:,.0f}")
+        col5.metric("Margin", f"{df_kpi.loc[0, 'MARGIN']:.2f}%")
 
     # Top Traders
     sql_top_traders = Path("queries/top_traders.sql").read_text()
@@ -71,48 +129,34 @@ def render(start_dt_utc, end_dt_utc, all_assets, all_durations,
     }
     
     df_top_traders = read_sql(sql_top_traders, params=sql_top_traders_params)
-
-    df_top_traders["OPEN"] = df_top_traders["PLAYER_ID"].apply(
-        lambda tid: f"?page=Trader&trader_id={tid}"
-    )
+    df_prominents = df_top_traders[['PLAYER_NAME', 'PLAYER_ID', 'VOL', 'TRADER_PNL',
+                                    'NUM_TRADES', 'LTV', 'NOTES']].drop_duplicates()
 
     st.subheader("Top Traders")
-    # st.dataframe(
-    #     df_top_traders,
-    #     use_container_width=True,
-    #     hide_index=True,
-    #     column_config={
-    #         "PLAYER_ID": "Trader ID",
-    #         "PLAYER_NAME": "Username",
-    #         "NUM_TRADES": "Num Trades",
-    #         "TRADER_PNL": "Total Profit",
-    #         "VOL": "Total Volume",
-    #         "OPEN": st.column_config.LinkColumn(
-    #             "Open",
-    #             display_text="Open Trader",
-    #             help="Open Trader page with this ID"
-    #         ),
-    #     }
-    # )
-    
-    # Display table rows with inline "Open" buttons
-    c1, c2, c3, c4, c5, c6 = st.columns([3, 3, 3, 3, 3, 3])
+    c1, c2, c3, c4, c5, c6, c7 = st.columns([20, 20, 20, 20, 20, 20, 50])
     _ = (c1.write("Username"), c2.write("Player ID"), c3.write("Num Trades"),
-         c4.write("Total Profit"), c5.write("Total Volume"))
-    for _, row in df_top_traders.iterrows():
-        # if c1.button(row["PLAYER_NAME"], key=f"open_{row['PLAYER_ID']}"):
-        #     st.query_params.update(page="Trader", trader_id=str(row["PLAYER_ID"]))
-        #     st.rerun()
+         c4.write("Total Profit"), c5.write("Total Volume")), c6.write("LTV")
+    for _, row in df_prominents.iterrows():
+        c1, c2, c3, c4, c5, c6, c7 = st.columns([20, 20, 20, 20, 20, 20, 50], vertical_alignment='center', gap="small")
+
         with c1:
-            # trader_link(row["PLAYER_ID"]) 
-            st.markdown(f"[{row['PLAYER_NAME']}](?page=Trader&trader_id={row['PLAYER_ID']})")
-        c2.write(row["PLAYER_ID"])
+            # trader_link(row["PLAYER_ID"])
+            # st.link_button(url =f"?page=Trader&trader_id={row['PLAYER_ID']}", label="Trader", type="tertiary")
+            # st.markdown(f"[{row['PLAYER_NAME']}](?page=Trader&trader_id={row['PLAYER_ID']})")
+            if st.button(row['PLAYER_NAME'], key=f"open_{row['PLAYER_ID']}"):
+                go_to_trader(row['PLAYER_ID'])
+        with c2:
+            with st.popover(label=f"{row['PLAYER_ID']}"):
+                selected_trader_data = df_top_traders.loc[df_top_traders["PLAYER_ID"] == row['PLAYER_ID']]
+                _show_trader_history(selected_trader_data, start_dt_utc, end_dt_utc)
+        # c2.write(f"{row['PLAYER_ID']}")
         c3.write(f"{row['NUM_TRADES']:,.0f}")
         c4.write(f"¥{row['TRADER_PNL']:,.0f}")
         c5.write(f"¥{row['VOL']:,.0f}")
-        with c6:
-            if st.button("Open", key=f"open_{row['PLAYER_ID']}"):
-                go_to_trader(row['PLAYER_ID'])
+        c6.write(f"¥{row['LTV']:,.0f}")
+        c7.write(f"{row['NOTES']}")
+
+
 
         
 
