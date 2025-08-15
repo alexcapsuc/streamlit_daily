@@ -48,7 +48,7 @@ def _show_trader_history(trader_data_orig, start_dt_utc, end_dt_utc):
             mode="lines",
             name="Volume",
             fill="tozeroy",
-            fillcolor="rgb(50, 50, 50, .1)",
+            fillcolor=colors_context["background_area"],
             line=dict(width=1, shape='hvh', color=colors_context["background_area"]),
             connectgaps=True,
             hovertemplate="%{x|%b %Y}<br>Volume = %{y}<extra></extra>",
